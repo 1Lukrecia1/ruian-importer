@@ -1,0 +1,9 @@
+spring:
+  # the datasource is provided by the PostGIS Testcontainer, see PostgisContainerConfig
+  sql:
+    init:
+      mode: always
+      schema-locations: file:db/schema.sql
+
+importer:
+  run-on-startup: false

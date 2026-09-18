@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="cs">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RÚIAN – obce a části obcí</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <style>
+        :root {
+            --border: #d8dee6;
+            --muted: #5a6672;
+            --accent: #2b6cb0;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+            color: #1b2430;
+        }
+
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        header h1 {
+            font-size: 16px;
+            margin: 0 8px 0 0;
+        }
+
+        select, button {
+            font: inherit;
+            padding: 5px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #fff;
+            color: inherit;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        button:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        button:disabled {
+            opacity: .6;
+            cursor: default;
+        }
+
+        #status {
+            color: var(--muted);
+            margin-left: auto;
+        }
+
+        label.file {
+            color: var(--muted);
+        }
+
+        .sources {
+            display: flex;
+            gap: 8px;
+        }
+
+        input[type=file] {
+            font: inherit;
+            max-width: 200px;
+        }
+
+        main {
+            display: flex;
+            height: calc(100vh - 53px);
+        }
+
+        #panel {
+            width: 280px;
+            min-width: 220px;
+            padding: 12px 16px;
+            border-right: 1px solid var(--border);
+            overflow: auto;
+        }
+
+        #panel h2 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--muted);
+            margin: 0 0 8px;
+        }
+
+        #casti {
+            list-style: none;
+            margin: 0 0 20px;
+            padding: 0;
+        }
+
+        #casti li {
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        #casti li:hover {
+            background: #eef3f9;
+        }
+
+        #casti .kod, .hint {
+            color: var(--muted);
+        }
+
+        #casti .kod {
+            float: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        #map {
+            flex: 1;
+        }
+
+        @media (max-width: 700px) {
+            main {
+                flex-direction: column;
+                height: auto;
+            }
+
+            #panel {
+                width: auto;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+
+            #map {
+                height: 60vh;
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>RÚIAN</h1>
+    <label>Obec <select id="obec"></select></label>
+    <span id="zdroje" class="sources"></span>
+    <label class="file">Soubor XML/ZIP <input type="file" id="soubor" accept=".xml,.zip,application/zip,text/xml"></label>
+    <button id="importFile" disabled>Importovat soubor</button>
+    <span id="status">…</span>
+</header>
+<main>
+    <aside id="panel">
+        <h2>Části obce</h2>
+        <ul id="casti"></ul>
+        <p id="geoHint" class="hint" hidden>Tato data neobsahují geometrii, na mapě není co vykreslit.</p>
+        <h2>Vysvětlivky</h2>
+        <p class="hint">Modrá plocha je hranice obce, <strong style="color:#2563eb">modrý bod</strong> její
+            definiční bod, <strong style="color:#c2410c">oranžové body</strong> jsou části obce.
+            Data jsou z databáze přepočtená do WGS 84.</p>
+    </aside>
+    <div id="map"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([49.8, 15.5], 7);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    const layers = L.layerGroup().addTo(map);
+    const obecSelect = document.getElementById('obec');
+    const castiList = document.getElementById('casti');
+    const statusText = document.getElementById('status');
+    const sourcesBar = document.getElementById('zdroje');
+    const geoHint = document.getElementById('geoHint');
+    const fileInput = document.getElementById('soubor');
+    const importFileButton = document.getElementById('importFile');
+    const markers = new Map();
+
+    /** Returns parsed JSON, or null for 404 (no data / no geometry). */
+    async function api(path, options) {
+        const response = await fetch(path, options);
+        if (response.status === 404) {
+            return null;
+        }
+        if (!response.ok) {
+            const problem = await response.json().catch(() => ({}));
+            throw new Error(problem.detail || `${response.status} ${response.statusText}`);
+        }
+        return response.json();
+    }
+
+    function showStatus(run, running) {
+        if (running) {
+            statusText.textContent = 'Import běží…';
+        } else if (!run) {
+            statusText.textContent = 'Zatím neproběhl žádný import';
+        } else if (run.status === 'SUCCESS') {
+            const finished = new Date(run.finishedAt).toLocaleString('cs-CZ');
+            statusText.textContent = `Poslední import ${finished}: ${run.obce} obcí, ${run.castiObci} částí`;
+        } else {
+            statusText.textContent = `Poslední import selhal: ${run.error}`;
+        }
+    }
+
+    async function loadStatus() {
+        const status = await api('/api/import/status');
+        showStatus(status.lastRun, status.running);
+    }
+
+    async function loadObce() {
+        const obce = await api('/api/obce');
+        obecSelect.replaceChildren(...obce.map(obec => new Option(`${obec.nazev} (${obec.kod})`, obec.kod)));
+        if (obce.length === 0) {
+            castiList.replaceChildren(Object.assign(document.createElement('li'),
+                {className: 'hint', textContent: 'Databáze je prázdná, spusťte import.'}));
+            return;
+        }
+        await showObec(obce[0].kod);
+    }
+
+    async function showObec(kod) {
+        layers.clearLayers();
+        markers.clear();
+        const bounds = L.latLngBounds([]);
+
+        const [obec, hranice, definicniBod, casti] = await Promise.all([
+            api(`/api/obce/${kod}`),
+            api(`/api/obce/${kod}/hranice`),
+            api(`/api/obce/${kod}/definicni-bod`),
+            api(`/api/obce/${kod}/casti-obci/geojson`)
+        ]);
+
+        if (hranice) {
+            const boundary = L.geoJSON(hranice, {style: {color: '#2b6cb0', weight: 2, fillOpacity: .08}});
+            boundary.addTo(layers);
+            bounds.extend(boundary.getBounds());
+        }
+        // anything that is missing (404 or null) is simply not drawn
+        const features = casti?.features ?? [];
+        for (const feature of features) {
+            const coordinates = feature.geometry?.coordinates;
+            if (!coordinates) {
+                continue;
+            }
+            const [lng, lat] = coordinates;
+            const {kod: castKod, nazev} = feature.properties;
+            const marker = L.circleMarker([lat, lng], {radius: 6, color: '#c2410c', fillColor: '#f97316', fillOpacity: .9})
+                .bindPopup(`<strong>${nazev}</strong><br>kód ${castKod}`)
+                .addTo(layers);
+            markers.set(castKod, marker);
+            bounds.extend([lat, lng]);
+        }
+
+        if (definicniBod) {
+            const [lng, lat] = definicniBod.coordinates;
+            // drawn last, it often lies exactly under the point of one of the casti obci
+            L.circleMarker([lat, lng], {radius: 9, color: '#1e3a8a', fillColor: '#2563eb', fillOpacity: 1, weight: 2})
+                .bindPopup(`<strong>${obec ? obec.nazev : 'Obec'}</strong><br>definiční bod obce`)
+                .addTo(layers);
+            bounds.extend([lat, lng]);
+        }
+
+        const seznamCasti = await api(`/api/obce/${kod}/casti-obci`) ?? [];
+        castiList.replaceChildren(...seznamCasti.map(cast => {
+            const item = document.createElement('li');
+            const kodSpan = document.createElement('span');
+            kodSpan.className = 'kod';
+            kodSpan.textContent = cast.kod;
+            item.append(kodSpan, cast.nazev);
+            if (!markers.has(cast.kod)) {
+                item.title = 'Bez geometrie';
+                item.style.opacity = '.6';
+            }
+            item.onclick = () => {
+                const marker = markers.get(cast.kod);
+                if (marker) {
+                    map.setView(marker.getLatLng(), 14);
+                    marker.openPopup();
+                }
+            };
+            return item;
+        }));
+
+        geoHint.hidden = bounds.isValid();
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, {padding: [24, 24]});
+        }
+    }
+
+    function disableButtons(disabled) {
+        document.querySelectorAll('header button').forEach(button => button.disabled = disabled);
+        if (!disabled) {
+            importFileButton.disabled = fileInput.files.length === 0;
+        }
+    }
+
+    /** One button per configured source (ČÚZK, soubor ze zadání, …). */
+    async function loadSources() {
+        const sources = await api('/api/import/zdroje');
+        sourcesBar.replaceChildren(...sources.map(source => {
+            const button = document.createElement('button');
+            button.textContent = `Import z ${source.name}`;
+            button.title = source.url;
+            button.onclick = () => runImport(`/api/import?zdroj=${encodeURIComponent(source.id)}`);
+            return button;
+        }));
+    }
+
+    async function runImport(path, options) {
+        disableButtons(true);
+        statusText.textContent = 'Import běží…';
+        try {
+            await api(path, {method: 'POST', ...options});
+            await loadStatus();
+            await loadObce();
+        } catch (e) {
+            statusText.textContent = `Import selhal: ${e.message}`;
+        } finally {
+            disableButtons(false);
+        }
+    }
+
+    function uploadFile() {
+        const formData = new FormData();
+        formData.append('soubor', fileInput.files[0]);
+        return runImport('/api/import/soubor', {body: formData});
+    }
+
+    obecSelect.onchange = () => showObec(Number(obecSelect.value));
+    importFileButton.onclick = uploadFile;
+    fileInput.onchange = () => importFileButton.disabled = fileInput.files.length === 0;
+
+    Promise.all([loadSources(), loadStatus(), loadObce()])
+        .catch(e => statusText.textContent = `Chyba: ${e.message}`);
+</script>
+</body>
+</html>

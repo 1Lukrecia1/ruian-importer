@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: ruian-importer
+  main:
+    banner-mode: off
+  jackson:
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      # RÚIAN XML files are tens of MB when not zipped
+      max-file-size: 128MB
+      max-request-size: 128MB
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ruian
+    username: ruian
+    password: ruian
+
+importer:
+  sources:
+    cuzk:
+      name: ČÚZK (aktuální data)
+      # {lastDayOfPreviousMonth} is replaced with the last day of the previous month (yyyyMMdd,
+      # in importer.schedule.zone), ČÚZK publishes the data of each obec under that date
+      url: https://vdp.cuzk.cz/vymenny_format/soucasna/{lastDayOfPreviousMonth}_OB_573060_UKSH.xml.zip
+    smartform:
+      name: smartform.cz (soubor ze zadání)
+      url: https://www.smartform.cz/download/kopidlno.xml.zip
+  # used on startup, by the schedule and by POST /api/import without the zdroj parameter
+  default-source: cuzk
+  # import once when the application starts
+  run-on-startup: true
+  connect-timeout: 30s
+  request-timeout: 5m
+  schedule:
+    # second minute hour day-of-month month day-of-week, "-" disables the scheduled import;
+    # ČÚZK publishes data as of the end of a month during the first day of the next month
+    cron: "0 0 3 2 * *"
+    zone: Europe/Prague

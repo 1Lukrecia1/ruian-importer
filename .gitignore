@@ -1,0 +1,10 @@
+.gradle/
+build/
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# downloaded data files in the project root
+/*.xml
+/*.zip
