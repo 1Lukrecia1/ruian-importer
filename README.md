@@ -142,6 +142,13 @@ Konfigurace (`application.yml`, lze přepsat proměnnými prostředí):
 
 Podporovány jsou i `file:` URL (např. `file:///tmp/kopidlno.xml.zip`), zazipované i nezazipované XML.
 
+Přihlašovací údaje k databázi (`ruian` / `ruian`) jsou **jednorázové lokální údaje pro tuto ukázku** –
+databázi s nimi vytváří `compose.yaml` a jsou proto i výchozí hodnotou v `application.yml`, aby šel
+projekt spustit jediným příkazem bez další konfigurace. Port databáze je vystavený jen na `localhost`.
+V reálném projektu se hesla do repozitáře nepíší: berou se z proměnných prostředí nebo ze správce
+tajemství (Docker/Kubernetes secrets, Vault, AWS Secrets Manager …). Zde k tomu stačí nastavit
+`SPRING_DATASOURCE_USERNAME` a `SPRING_DATASOURCE_PASSWORD`, které hodnoty z `application.yml` přebijí.
+
 ## Testy
 
 ```bash

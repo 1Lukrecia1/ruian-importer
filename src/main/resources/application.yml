@@ -10,6 +10,9 @@ spring:
       # RÚIAN XML files are tens of MB when not zipped
       max-file-size: 128MB
       max-request-size: 128MB
+  # throwaway local credentials: the database is created with them by compose.yaml and they are
+  # the default here so that the project runs with a single command. In a real project credentials
+  # never belong in the repository, they come from env variables or a secrets manager.
   datasource:
     url: jdbc:postgresql://localhost:5432/ruian
     username: ruian

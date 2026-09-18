@@ -5,6 +5,7 @@ services:
     environment:
       POSTGRES_DB: ruian
       POSTGRES_USER: ruian
+      # throwaway local credentials for this demo only, a real project takes them from secrets
       POSTGRES_PASSWORD: ruian
     ports:
       - "${DB_PORT:-5432}:5432"
